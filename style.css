@@ -20,9 +20,14 @@
     background: rgba(0, 0, 0, 0.5); 
     border-radius: 5px 5px 0 0; 
 }
-.lb-tab { flex: 1; text-align: center; padding: 8px; cursor: pointer; opacity: 0.7; border-bottom: 2px solid transparent; transition: 0.2s; }
+.lb-tab { 
+    flex: 1; text-align: center; padding: 12px 5px;
+    cursor: pointer; opacity: 0.7; border-bottom: 3px solid transparent; 
+    transition: 0.2s; font-size: 1.1em;
+    text-transform: uppercase; letter-spacing: 1px;
+}
 .lb-tab:hover { opacity: 1; background-color: rgba(255,255,255,0.1); }
-.lb-tab.active { opacity: 1; border-bottom: 2px solid var(--smart-accent); font-weight: bold; background-color: rgba(255,255,255,0.05); }
+.lb-tab.active { opacity: 1; border-bottom: 3px solid var(--smart-accent); font-weight: bold; background-color: rgba(255,255,255,0.05); }
 
 .lb-view { display: none; flex-direction: column; height: 100%; }
 .lb-view.active { display: flex; }
@@ -32,12 +37,20 @@
     overflow-y: auto; max-height: 45vh; padding-right: 2px; 
 }
 .lb-action-btn { 
-    width: 100%; text-align: center; padding: 10px 5px; 
-    font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    width: 100%; text-align: center; padding: 12px 5px; 
+    font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     background-color: rgba(0, 0, 0, 0.6) !important;
     border: 1px solid var(--smart-border);
+    transition: all 0.2s;
 }
 .lb-action-btn:hover { background-color: var(--smart-accent) !important; color: #fff; }
+
+.lb-active-btn {
+    border: 2px solid #00ff00 !important;
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.4);
+    color: #00ff00 !important;
+    font-weight: bold;
+}
 
 .lb-chain-list { display: flex; flex-direction: column; gap: 5px; overflow-y: auto; max-height: 45vh; padding-right: 2px; }
 .lb-chain-row { display: flex; width: 100%; }
@@ -45,8 +58,21 @@
     flex: 1; text-align: left; padding: 8px 10px; font-size: 0.9em; 
     background-color: rgba(0, 80, 0, 0.7) !important; 
     border: 1px solid var(--smart-border);
+    transition: all 0.2s;
 }
 .lb-chain-btn:hover { background-color: rgba(0, 120, 0, 0.9) !important; }
+
+.lb-active-chain {
+    border: 1px solid #00ff00 !important;
+    box-shadow: inset 0 0 5px rgba(0, 255, 0, 0.3);
+    color: #00ff00 !important;
+    font-weight: bold;
+}
+
+.lb-paused-chain {
+    border: 1px solid #ffa500 !important;
+    color: #ffa500 !important;
+}
 
 .lb-separator { height: 1px; background-color: var(--smart-border); margin: 8px 0; opacity: 0.5; }
 
@@ -57,11 +83,14 @@
     padding: 8px; border-radius: 5px; 
     border: 1px solid var(--smart-border);
 }
-.lb-small-input { width: 50px; text-align: center; padding: 3px; margin-left: 5px; background-color: rgba(0,0,0,0.5); border: 1px solid var(--smart-border); color: var(--smart-text-color); border-radius: 4px; }
+.lb-small-input { padding: 3px; margin-left: 5px; background-color: rgba(0,0,0,0.5); border: 1px solid var(--smart-border); color: var(--smart-text-color); border-radius: 4px; }
 .lb-checkbox-container { display: flex; align-items: center; cursor: pointer; gap: 5px; font-size: 0.9em; }
 
 .lb-flush-btn { background-color: #6d360e !important; width: 100%; border: 1px solid var(--smart-border); }
 .lb-flush-btn:hover { background-color: #8a4411 !important; }
+
+.lb-swipe-btn { background-color: #0e456d !important; width: 100%; border: 1px solid var(--smart-border); }
+.lb-swipe-btn:hover { background-color: #11588a !important; }
 
 .lb-counter-row { 
     text-align: center; font-size: 0.85em; 
@@ -69,6 +98,9 @@
     padding: 5px; border-radius: 4px; 
     border: 1px solid var(--smart-border); 
 }
+
+.lb-nav-btn { cursor: pointer; opacity: 0.6; padding: 5px; transition: 0.2s; font-size: 1.1em; }
+.lb-nav-btn:hover { opacity: 1; color: var(--smart-accent); transform: scale(1.1); }
 
 /* SETTINGS */
 .lb-settings-form { 
