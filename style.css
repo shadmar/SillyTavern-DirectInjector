@@ -112,8 +112,11 @@
 .lb-form-row.flex-row { display: flex; gap: 10px; align-items: center; }
 .lb-form-row label { display: block; font-size: 0.85em; margin-bottom: 3px; opacity: 0.9; font-weight: bold; }
 
+.lb-big-textarea { height: 120px !important; resize: vertical; }
+
 .lb-settings-list { 
-    max-height: 250px; overflow-y: auto; 
+    max-height: 400px; /* Taller list since it's the only thing visible */
+    overflow-y: auto; 
     border: 1px solid var(--smart-border); 
     border-radius: 5px; 
     background: rgba(0, 0, 0, 0.7); 

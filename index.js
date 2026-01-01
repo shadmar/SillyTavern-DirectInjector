@@ -134,7 +134,6 @@ async function flushInjections() {
 async function reapplyAndSwipe() {
     isRetrying = true;
     
-    // Logic: If on chain, Retry should repeat the CURRENT step (index-1)
     if (activeChain && activeChain.index > 0) {
         const currentStepLabel = activeChain.steps[activeChain.index - 1];
         const settings = getSettings();
@@ -164,92 +163,6 @@ async function reapplyAndSwipe() {
     }
 }
 
-// --- CHAIN NAVIGATION (FIXED) ---
-
-function adjustChainStep(delta) {
-    if (!activeChain) return;
-    
-    // Calculate new 'Next' index
-    const newNextIndex = activeChain.index + delta;
-    
-    // Bounds check
-    if (newNextIndex < 0 || newNextIndex > activeChain.steps.length) {
-        toastr.warning("Limit reached.");
-        return;
-    }
-    
-    // 1. Clear context
-    clearEphemeralOnly();
-
-    // 2. Commit Index
-    activeChain.index = newNextIndex;
-    
-    // 3. Inject the NEW 'Current' step (which is index - 1)
-    // Because activeChain.index always points to the COMING step.
-    const newCurrentIndex = newNextIndex - 1;
-    
-    if (newCurrentIndex >= 0 && newCurrentIndex < activeChain.steps.length) {
-        const label = activeChain.steps[newCurrentIndex];
-        const settings = getSettings();
-        const btnData = settings.buttons.find(b => b.label === label);
-        
-        if (btnData) {
-            injectButton(btnData, true); // Actually inject it now!
-            lastInjectedBtn = btnData;   // Ensure retry works
-        } else {
-            toastr.error(`Button "${label}" not found!`);
-        }
-    }
-
-    updateVisualState();
-    
-    // Display Toast
-    const currentLabel = (newCurrentIndex >= 0) ? activeChain.steps[newCurrentIndex] : "Start";
-    toastr.info(`Jumped to: ${currentLabel}`);
-}
-
-// --- VISUAL UPDATES ---
-
-function updateVisualState() {
-    const pCount = activePerms.size;
-    const eCount = activeEphs.size;
-    
-    let statusHtml = `<span style="color:${pCount > 0 ? '#ff8888' : '#aaa'}">${pCount} Perm</span> | <span style="color:${eCount > 0 ? '#88ff88' : '#aaa'}">${eCount} Eph</span>`;
-    
-    if (activeChain) {
-        const currentStepLabel = (activeChain.index > 0) ? activeChain.steps[activeChain.index - 1] : "Start";
-        const nextStepLabel = activeChain.steps[activeChain.index] || "Finish";
-        
-        statusHtml = `
-            <div style="display:flex; align-items:center; justify-content:center; gap:8px; width:100%;">
-                <i class="fa-solid fa-backward lb-nav-btn" id="lb-chain-prev" title="Previous Step"></i>
-                <span style="color:#4dbf00; font-weight:bold; font-size:0.85em; text-align:center; line-height:1.2;">
-                    ${activeChain.name} (${activeChain.index}/${activeChain.steps.length})<br>
-                    <span style="color:#fff; opacity:0.9;">Curr: ${currentStepLabel}</span> <span style="opacity:0.5;">|</span> <span style="color:#aaa;">Next: ${nextStepLabel}</span>
-                </span>
-                <i class="fa-solid fa-forward lb-nav-btn" id="lb-chain-next" title="Skip Step"></i>
-            </div>`;
-    }
-    
-    $('#lb-counter-display').html(statusHtml);
-
-    if (activeChain) {
-        $('#lb-chain-prev').off('click').on('click', () => adjustChainStep(-1));
-        $('#lb-chain-next').off('click').on('click', () => adjustChainStep(1));
-    }
-
-    $('.lb-action-btn').each(function() {
-        const btnLabel = $(this).data('label');
-        if (!btnLabel) return;
-        const id = String(btnLabel).replace(/[^a-zA-Z0-9]/g, '_');
-        if (activePerms.has(id) || activeEphs.has(id)) {
-            $(this).addClass('lb-active-btn');
-        } else {
-            $(this).removeClass('lb-active-btn');
-        }
-    });
-}
-
 // --- CHAIN LOGIC ---
 
 async function toggleChain(chainIndex) {
@@ -270,7 +183,6 @@ async function toggleChain(chainIndex) {
     if (pausedChainState && pausedChainState.originIndex === chainIndex) {
         activeChain = { ...pausedChainState };
         pausedChainState = null;
-        console.log(`[${extensionName}] Resuming Chain at step ${activeChain.index}`);
         if (activeChain.index > 0) activeChain.index--; 
         executeChainStep();
         return;
@@ -326,6 +238,72 @@ function executeChainStep() {
     }
 }
 
+function adjustChainStep(delta) {
+    if (!activeChain) return;
+    
+    const newIndex = activeChain.index + delta;
+    if (newIndex < 0 || newIndex > activeChain.steps.length) {
+        toastr.warning("Limit reached.");
+        return;
+    }
+    
+    clearEphemeralOnly();
+    activeChain.index = newIndex;
+    
+    if(newIndex > 0) {
+        const label = activeChain.steps[newIndex - 1];
+        const settings = getSettings();
+        const btnData = settings.buttons.find(b => b.label === label);
+        if(btnData) lastInjectedBtn = btnData;
+    }
+
+    updateVisualState();
+    const currentLabel = activeChain.steps[activeChain.index] || "Finish";
+    toastr.info(`Next up: ${currentLabel}`);
+}
+
+// --- VISUAL UPDATES ---
+
+function updateVisualState() {
+    const pCount = activePerms.size;
+    const eCount = activeEphs.size;
+    
+    let statusHtml = `<span style="color:${pCount > 0 ? '#ff8888' : '#aaa'}">${pCount} Perm</span> | <span style="color:${eCount > 0 ? '#88ff88' : '#aaa'}">${eCount} Eph</span>`;
+    
+    if (activeChain) {
+        const currentStepLabel = (activeChain.index > 0) ? activeChain.steps[activeChain.index - 1] : "Start";
+        const nextStepLabel = activeChain.steps[activeChain.index] || "Finish";
+        
+        statusHtml = `
+            <div style="display:flex; align-items:center; justify-content:center; gap:8px; width:100%;">
+                <i class="fa-solid fa-backward lb-nav-btn" id="lb-chain-prev" title="Previous Step"></i>
+                <span style="color:#4dbf00; font-weight:bold; font-size:0.85em; text-align:center; line-height:1.2;">
+                    ${activeChain.name} (${activeChain.index}/${activeChain.steps.length})<br>
+                    <span style="color:#fff; opacity:0.9;">Curr: ${currentStepLabel}</span> <span style="opacity:0.5;">|</span> <span style="color:#aaa;">Next: ${nextStepLabel}</span>
+                </span>
+                <i class="fa-solid fa-forward lb-nav-btn" id="lb-chain-next" title="Skip Step"></i>
+            </div>`;
+    }
+    
+    $('#lb-counter-display').html(statusHtml);
+
+    if (activeChain) {
+        $('#lb-chain-prev').off('click').on('click', () => adjustChainStep(-1));
+        $('#lb-chain-next').off('click').on('click', () => adjustChainStep(1));
+    }
+
+    $('.lb-action-btn').each(function() {
+        const btnLabel = $(this).data('label');
+        if (!btnLabel) return;
+        const id = String(btnLabel).replace(/[^a-zA-Z0-9]/g, '_');
+        if (activePerms.has(id) || activeEphs.has(id)) {
+            $(this).addClass('lb-active-btn');
+        } else {
+            $(this).removeClass('lb-active-btn');
+        }
+    });
+}
+
 // --- UI HELPERS ---
 
 function togglePanel() {
@@ -363,7 +341,14 @@ function sanitizeSettings() {
     if (changed) saveSettingsDebounced();
 }
 
-// --- SETTINGS ---
+// --- SETTINGS VIEW MANAGEMENT ---
+
+function showSettingsView(viewId) {
+    $('.lb-settings-view').hide();
+    $(`#${viewId}`).show();
+}
+
+// --- SETTINGS LOGIC ---
 
 function saveButton(btnData) {
     const settings = getSettings();
@@ -374,41 +359,45 @@ function saveButton(btnData) {
         settings.buttons.push(btnData);
         toastr.success("Added!");
     }
-    exitEditMode();
+    closeButtonEditor();
     saveSettingsDebounced();
-    refreshUI();
-    refreshSettingsUI();
+    refreshUI(); // Panel
+    refreshSettingsUI(); // Settings List
 }
 
 function removeButton(index) {
     const settings = getSettings();
     settings.buttons.splice(index, 1);
-    if (editingIndex === index) exitEditMode();
     saveSettingsDebounced();
     refreshUI();
     refreshSettingsUI();
 }
 
-function startEdit(index) {
+function openButtonEditor(index = null) {
     const settings = getSettings();
-    const btn = settings.buttons[index];
-    if (!btn) return;
     editingIndex = index;
-    $('#lb_new_label').val(btn.label);
-    $('#lb_new_content').val(btn.content || "");
-    $('#lb_add_btn').text("Save").addClass('lb-save-mode');
-    $('#lb_cancel_btn').show();
-    $('#lb_form_title').text("Edit Button");
+    
+    if (index !== null) {
+        const btn = settings.buttons[index];
+        $('#lb_new_label').val(btn.label);
+        $('#lb_new_content').val(btn.content || "");
+        $('#lb_btn_form_title').text("Edit Button");
+        $('#lb_add_btn').text("Update Button");
+    } else {
+        $('#lb_new_label').val('');
+        $('#lb_new_content').val('');
+        $('#lb_btn_form_title').text("Create New Button");
+        $('#lb_add_btn').text("Create Button");
+    }
+    showSettingsView('lb-view-editor-button');
 }
 
-function exitEditMode() {
+function closeButtonEditor() {
     editingIndex = null;
-    $('#lb_new_label').val('');
-    $('#lb_new_content').val('');
-    $('#lb_add_btn').text("Add").removeClass('lb-save-mode');
-    $('#lb_cancel_btn').hide();
-    $('#lb_form_title').text("Add New Button");
+    showSettingsView('lb-view-main-list');
 }
+
+// --- CHAIN EDITOR LOGIC ---
 
 function saveChain(chainName, isEphemeral) {
     const settings = getSettings();
@@ -430,45 +419,46 @@ function saveChain(chainName, isEphemeral) {
         settings.chains.push(newChain);
         toastr.success("Chain Created!");
     }
+    closeChainEditor();
     saveSettingsDebounced();
     refreshUI();
     refreshSettingsUI();
-    exitEditChainMode();
 }
 
 function removeChain(index) {
     const settings = getSettings();
     settings.chains.splice(index, 1);
-    if (editingChainIndex === index) exitEditChainMode();
     saveSettingsDebounced();
     refreshUI();
     refreshSettingsUI();
 }
 
-function startEditChain(index) {
+function openChainEditor(index = null) {
     const settings = getSettings();
-    const chain = settings.chains[index];
-    if (!chain) return;
     editingChainIndex = index;
-    $('#lb_chain_name').val(chain.name);
-    $('#lb_chain_ephemeral').prop('checked', chain.ephemeral !== false);
-    currentChainSteps = [...chain.steps];
+    
+    if (index !== null) {
+        const chain = settings.chains[index];
+        $('#lb_chain_name').val(chain.name);
+        $('#lb_chain_ephemeral').prop('checked', chain.ephemeral !== false);
+        currentChainSteps = [...chain.steps];
+        $('#lb_chain_form_title').text("Edit Chain");
+        $('#lb_save_chain_btn').text("Update Chain");
+    } else {
+        $('#lb_chain_name').val('');
+        $('#lb_chain_ephemeral').prop('checked', true);
+        currentChainSteps = [];
+        $('#lb_chain_form_title').text("Create New Chain");
+        $('#lb_save_chain_btn').text("Create Chain");
+    }
+    
     renderChainPreview();
-    $('#lb_save_chain_btn').text("Update Chain").addClass('lb-save-mode');
-    $('#lb_cancel_chain_btn').show();
-    try {
-        $('.inline-drawer-content').animate({ scrollTop: $('#lb_chain_name').offset().top }, 200);
-    } catch(e) {}
+    showSettingsView('lb-view-editor-chain');
 }
 
-function exitEditChainMode() {
+function closeChainEditor() {
     editingChainIndex = null;
-    $('#lb_chain_name').val('');
-    $('#lb_chain_ephemeral').prop('checked', true);
-    currentChainSteps = [];
-    renderChainPreview();
-    $('#lb_save_chain_btn').text("Save Chain").removeClass('lb-save-mode');
-    $('#lb_cancel_chain_btn').hide();
+    showSettingsView('lb-view-main-list');
 }
 
 function resetDefaults() {
@@ -603,70 +593,90 @@ function injectSettingsMenu() {
                     <input id="lb-reset-pos-btn" class="menu_button" type="button" value="Reset Position" style="flex:1" />
                 </div>
                 <hr class="sysHR">
-                
-                <h4 id="lb_form_title">Add New Button</h4>
-                <div class="lb-settings-form">
-                    <div class="lb-form-row">
-                        <label>Label</label>
-                        <input type="text" id="lb_new_label" class="text_pole" placeholder="e.g. Kiss">
-                    </div>
-                    <div class="lb-form-row">
-                        <label>Content</label>
-                        <textarea id="lb_new_content" class="text_pole" rows="2"></textarea>
-                    </div>
-                    <div class="lb-form-row flex-row">
-                        <button id="lb_add_btn" class="menu_button" style="flex:2">Add Button</button>
-                        <button id="lb_cancel_btn" class="menu_button" style="flex:1; display:none; background:#777;">Cancel</button>
-                    </div>
-                </div>
 
-                <hr class="sysHR">
-
-                <h4>Create / Edit Chain</h4>
-                <div class="lb-settings-form">
-                    <div class="lb-form-row">
-                        <label>Chain Name</label>
-                        <input type="text" id="lb_chain_name" class="text_pole" placeholder="e.g. Dungeon Loop">
-                    </div>
-                    <div class="lb-form-row">
-                        <label class="lb-checkbox-container">
-                            <input id="lb-chain_ephemeral" type="checkbox" checked> <span style="margin-left:4px">Ephemeral Chain?</span>
-                        </label>
-                        <small style="opacity:0.7; display:block;">If checked, this chain will ignore the global ephemeral setting.</small>
-                    </div>
+                <div id="lb-view-main-list" class="lb-settings-view">
                     
-                    <div class="lb-form-row flex-row">
-                        <div style="flex:3">
-                            <label>Add Step</label>
-                            <select id="lb_chain_source" class="text_pole"></select>
-                        </div>
-                        <div style="flex:1; display:flex; align-items:flex-end;">
-                            <button id="lb_add_step_btn" class="menu_button" title="Add Step"><i class="fa-solid fa-plus"></i></button>
-                        </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                        <h4>Buttons</h4>
+                        <button id="lb-create-btn-go" class="menu_button" style="width:auto; padding:2px 8px;"><i class="fa-solid fa-plus"></i> New Button</button>
                     </div>
-                    <div class="lb-form-row">
-                        <label>Steps Sequence</label>
-                        <div id="lb_chain_preview" class="lb-chain-preview-box"></div>
+                    <div id="lb_settings_buttons_list" class="lb-settings-list" style="margin-bottom:20px;"></div>
+
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                        <h4>Chains</h4>
+                        <button id="lb-create-chain-go" class="menu_button" style="width:auto; padding:2px 8px;"><i class="fa-solid fa-plus"></i> New Chain</button>
                     </div>
-                    <div class="lb-form-row flex-row">
-                        <button id="lb_save_chain_btn" class="menu_button" style="flex:2">Save Chain</button>
-                        <button id="lb_cancel_chain_btn" class="menu_button" style="flex:1; display:none; background:#777;">Cancel</button>
+                    <div id="lb_settings_chains_list" class="lb-settings-list"></div>
+
+                    <div style="margin-top:20px; text-align:right;">
+                        <button id="lb_reset_btn" class="menu_button" style="background:#7a2e2e;">Reset Defaults</button>
                     </div>
                 </div>
 
-                <hr class="sysHR">
-
-                <h4>Manage Items</h4>
-                <div id="lb_settings_list" class="lb-settings-list"></div>
-                <div style="margin-top:10px; text-align:right;">
-                    <button id="lb_reset_btn" class="menu_button" style="background:#7a2e2e;">Reset Defaults</button>
+                <div id="lb-view-editor-button" class="lb-settings-view" style="display:none;">
+                    <h4 id="lb_btn_form_title">Edit Button</h4>
+                    <div class="lb-settings-form">
+                        <div class="lb-form-row">
+                            <label>Label</label>
+                            <input type="text" id="lb_new_label" class="text_pole" placeholder="e.g. Attack">
+                        </div>
+                        <div class="lb-form-row">
+                            <label>Content</label>
+                            <textarea id="lb_new_content" class="text_pole lb-big-textarea" rows="6"></textarea>
+                        </div>
+                        <div class="lb-form-row flex-row">
+                            <button id="lb_add_btn" class="menu_button" style="flex:2">Save Button</button>
+                            <button id="lb_cancel_btn" class="menu_button" style="flex:1; background:#777;">Cancel</button>
+                        </div>
+                    </div>
                 </div>
+
+                <div id="lb-view-editor-chain" class="lb-settings-view" style="display:none;">
+                    <h4 id="lb_chain_form_title">Edit Chain</h4>
+                    <div class="lb-settings-form">
+                        <div class="lb-form-row">
+                            <label>Chain Name</label>
+                            <input type="text" id="lb_chain_name" class="text_pole" placeholder="e.g. Dungeon Loop">
+                        </div>
+                        <div class="lb-form-row">
+                            <label class="lb-checkbox-container">
+                                <input id="lb-chain_ephemeral" type="checkbox" checked> <span style="margin-left:4px">Ephemeral Chain?</span>
+                            </label>
+                        </div>
+                        
+                        <div class="lb-form-row flex-row">
+                            <div style="flex:3">
+                                <label>Add Step</label>
+                                <select id="lb_chain_source" class="text_pole"></select>
+                            </div>
+                            <div style="flex:1; display:flex; align-items:flex-end;">
+                                <button id="lb_add_step_btn" class="menu_button" title="Add Step"><i class="fa-solid fa-plus"></i></button>
+                            </div>
+                        </div>
+                        <div class="lb-form-row">
+                            <label>Steps Sequence</label>
+                            <div id="lb_chain_preview" class="lb-chain-preview-box"></div>
+                        </div>
+                        <div class="lb-form-row flex-row">
+                            <button id="lb_save_chain_btn" class="menu_button" style="flex:2">Save Chain</button>
+                            <button id="lb_cancel_chain_btn" class="menu_button" style="flex:1; background:#777;">Cancel</button>
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
     </div>`;
 
     container.append(settingsHtml);
 
+    // NAVIGATION
+    $('#lb-create-btn-go').on('click', () => openButtonEditor(null));
+    $('#lb-create-chain-go').on('click', () => openChainEditor(null));
+    $('#lb_cancel_btn').on('click', closeButtonEditor);
+    $('#lb_cancel_chain_btn').on('click', closeChainEditor);
+
+    // BUTTON EDITOR
     $('#lb_add_btn').on('click', () => {
         const label = $('#lb_new_label').val().trim();
         const content = $('#lb_new_content').val().trim();
@@ -674,6 +684,7 @@ function injectSettingsMenu() {
         else toastr.warning("Label and Content required");
     });
 
+    // CHAIN EDITOR
     $('#lb_add_step_btn').on('click', () => {
         const val = $('#lb_chain_source').val();
         if(val) {
@@ -692,8 +703,6 @@ function injectSettingsMenu() {
         }
     });
 
-    $('#lb_cancel_btn').on('click', exitEditMode);
-    $('#lb_cancel_chain_btn').on('click', exitEditChainMode);
     $('#lb_reset_btn').on('click', () => { if(confirm("Reset all?")) resetDefaults(); });
     $('#lb-force-open-btn').on('click', togglePanel);
     $('#lb-reset-pos-btn').on('click', () => { $('#lb-injector-panel').css({ top: '100px', left: '100px', display: 'flex' }); });
@@ -745,35 +754,37 @@ function refreshSettingsUI() {
     const buttons = settings.buttons || [];
     const chains = settings.chains || [];
 
+    // CHAIN STEPS DROPDOWN
     const sourceSelect = $('#lb_chain_source');
     sourceSelect.empty();
     buttons.forEach(btn => {
         sourceSelect.append(`<option value="${btn.label}">${btn.label}</option>`);
     });
 
-    const settingsList = $('#lb_settings_list');
-    settingsList.empty();
-
-    settingsList.append('<div style="padding:5px; background:rgba(0,0,0,0.2);"><b>Buttons</b></div>');
+    // BUTTONS LIST
+    const btnList = $('#lb_settings_buttons_list');
+    btnList.empty();
     buttons.forEach((btn, index) => {
         const item = $(`
-            <div class="lb-settings-item ${editingIndex === index ? 'lb-editing-item' : ''}">
-                <div style="flex:1; overflow:hidden;"><b>${btn.label}</b></div>
+            <div class="lb-settings-item">
+                <div style="flex:1; overflow:hidden; font-weight:bold;">${btn.label}</div>
                 <div class="lb-tools">
                     <div class="lb-edit-btn"><i class="fa-solid fa-pencil"></i></div>
                     <div class="lb-delete-btn"><i class="fa-solid fa-trash"></i></div>
                 </div>
             </div>
         `);
-        item.find('.lb-edit-btn').on('click', () => startEdit(index));
+        item.find('.lb-edit-btn').on('click', () => openButtonEditor(index));
         item.find('.lb-delete-btn').on('click', () => { if(confirm(`Remove?`)) removeButton(index); });
-        settingsList.append(item);
+        btnList.append(item);
     });
 
-    settingsList.append('<div style="padding:5px; background:rgba(0,0,0,0.2); margin-top:10px;"><b>Chains</b></div>');
+    // CHAINS LIST
+    const chainList = $('#lb_settings_chains_list');
+    chainList.empty();
     chains.forEach((chain, index) => {
         const item = $(`
-            <div class="lb-settings-item ${editingChainIndex === index ? 'lb-editing-item' : ''}">
+            <div class="lb-settings-item">
                 <div style="flex:1; overflow:hidden;"><b>${chain.name}</b> <small>(${chain.steps.length} steps)</small></div>
                 <div class="lb-tools">
                     <div class="lb-edit-chain-btn" style="color:var(--smart-accent); cursor:pointer;"><i class="fa-solid fa-pencil"></i></div>
@@ -781,9 +792,9 @@ function refreshSettingsUI() {
                 </div>
             </div>
         `);
-        item.find('.lb-edit-chain-btn').on('click', () => startEditChain(index));
+        item.find('.lb-edit-chain-btn').on('click', () => openChainEditor(index));
         item.find('.lb-delete-chain-btn').on('click', () => { if(confirm(`Remove Chain?`)) removeChain(index); });
-        settingsList.append(item);
+        chainList.append(item);
     });
 }
 
