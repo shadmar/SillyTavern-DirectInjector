@@ -13,8 +13,10 @@ let pausedChainState = null;
 let currentChainSteps = [];   
 let lastInjectedBtn = null;   
 let isRetrying = false;       
-const activePerms = new Set();
-const activeEphs = new Set();
+
+// Maps to store injection depth: Map<id, depth>
+const activePerms = new Map();
+const activeEphs = new Map();
 
 // --- DEFAULTS ---
 const DEFAULT_BUTTONS = [
@@ -33,9 +35,9 @@ const DEFAULT_BUTTONS = [
 ];
 
 const DEFAULT_CHAINS = [
-    { name: "Standard Combat", steps: ["Buff", "Taunt", "Slash", "Block", "Slash", "Loot"] },
-    { name: "Dungeon Crawl", steps: ["Stealth", "Scout", "Stealth", "Scout", "Loot"] },
-    { name: "Epic Boss", steps: ["Scout", "Buff", "Taunt", "Slash", "Block", "Dodge", "Fireball", "Heal", "Finisher", "Loot"] }
+    { name: "Standard Combat", ephemeral: true, steps: ["Buff", "Taunt", "Slash", "Block", "Slash", "Loot"] },
+    { name: "Dungeon Crawl", ephemeral: true, steps: ["Stealth", "Scout", "Stealth", "Scout", "Loot"] },
+    { name: "Epic Boss", ephemeral: true, steps: ["Scout", "Buff", "Taunt", "Slash", "Block", "Dodge", "Fireball", "Heal", "Finisher", "Loot"] }
 ];
 
 // --- COMMAND EXECUTION ---
@@ -63,20 +65,31 @@ async function executeCommand(command) {
 async function injectButton(btnData, isAuto = false) {
     if (!btnData || !btnData.label) return;
 
+    const id = String(btnData.label).replace(/[^a-zA-Z0-9]/g, '_');
+
+    // Toggle Off Logic
+    if (!isAuto && (activePerms.has(id) || activeEphs.has(id))) {
+        await executeCommand(`/inject id="${id}" ""`); // Clear content
+        activePerms.delete(id);
+        activeEphs.delete(id);
+        toastr.info(`Removed: ${btnData.label}`);
+        updateVisualState();
+        return; 
+    }
+
     lastInjectedBtn = btnData; 
 
     const depth = parseInt($('#lb-global-depth').val()) || 0;
     const role = $('#lb-global-role').val() || 'system';
     
     // --- FORCE EPHEMERAL FOR CHAINS ---
-    // If a chain is active, we force ephemeral. 
-    // Otherwise, we respect the user's checkbox setting for manual buttons.
-    let isEphemeral = $('#lb-global-eph').is(':checked');
+    let isEphemeral;
     if (activeChain) {
-        isEphemeral = true;
+        isEphemeral = true; // Force True for Chains
+    } else {
+        isEphemeral = $('#lb-global-eph').is(':checked');
     }
 
-    const id = String(btnData.label).replace(/[^a-zA-Z0-9]/g, '_');
     let rawContent = String(btnData.content || `[${btnData.label}]`);
     const safeContent = rawContent.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
     
@@ -88,11 +101,17 @@ async function injectButton(btnData, isAuto = false) {
     else toastr.success(`Injected: ${btnData.label}`, "", { timeOut: 1000 });
 
     if (isEphemeral) {
-        activeEphs.add(id);
+        activeEphs.set(id, depth);
         activePerms.delete(id);
     } else {
-        activePerms.add(id);
+        activePerms.set(id, depth);
         activeEphs.delete(id);
+        
+        // --- SAFETY RESET ---
+        // If user manually applied a permanent injection, auto-reset the UI checkbox back to Ephemeral
+        if (!activeChain) {
+            $('#lb-global-eph').prop('checked', true);
+        }
     }
     updateVisualState();
 }
@@ -113,13 +132,11 @@ async function flushInjections() {
         refreshUI(); 
     }
 
-    // Always clear ephemeral if we are stopping a chain or if checkbox is checked
     if (isEphemeralMode || activeChain === null) {
         await clearEphemeralOnly();
         if(isEphemeralMode) toastr.info("Flushed ephemeral.");
     } 
     
-    // Only clear permanent if we are NOT in ephemeral mode and NO chain was running
     if (!isEphemeralMode && !activeChain) {
         const settings = getSettings();
         const buttons = settings.buttons || [];
@@ -206,6 +223,7 @@ function startChain(chainIndex) {
     activeChain = { 
         name: chain.name, 
         steps: [...chain.steps], 
+        ephemeral: true, // Forced true
         originIndex: chainIndex, 
         index: 0 
     };
@@ -300,15 +318,66 @@ function updateVisualState() {
     }
 
     $('.lb-action-btn').each(function() {
-        const btnLabel = $(this).data('label');
+        const btnLabel = $(this).attr('data-label');
         if (!btnLabel) return;
         const id = String(btnLabel).replace(/[^a-zA-Z0-9]/g, '_');
-        if (activePerms.has(id) || activeEphs.has(id)) {
-            $(this).addClass('lb-active-btn');
-        } else {
-            $(this).removeClass('lb-active-btn');
+        
+        $(this).removeClass('lb-active-eph lb-active-perm');
+        $(this).text(btnLabel); 
+
+        if (activeEphs.has(id)) {
+            const depth = activeEphs.get(id);
+            $(this).addClass('lb-active-eph');
+            $(this).text(`${btnLabel} [${depth}]`);
+        } else if (activePerms.has(id)) {
+            const depth = activePerms.get(id);
+            $(this).addClass('lb-active-perm');
+            $(this).text(`${btnLabel} [${depth}]`);
         }
     });
+}
+
+// --- EXPORT / IMPORT ---
+
+function exportSettings() {
+    const settings = getSettings();
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(settings, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "lorebook_keys_settings.json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+    toastr.success("Settings exported!");
+}
+
+function importSettingsTrigger() {
+    $('#lb-import-file').click();
+}
+
+function handleImportFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const json = JSON.parse(e.target.result);
+            if (!json.buttons || !json.chains) {
+                throw new Error("Invalid file format.");
+            }
+            extension_settings[extensionKey] = json;
+            saveSettingsDebounced();
+            refreshUI();
+            refreshSettingsUI();
+            toastr.success("Settings imported successfully!");
+        } catch (err) {
+            console.error(err);
+            toastr.error("Import failed: " + err.message);
+        }
+        $('#lb-import-file').val(''); 
+    };
+    reader.readAsText(file);
 }
 
 // --- UI HELPERS ---
@@ -348,14 +417,12 @@ function sanitizeSettings() {
     if (changed) saveSettingsDebounced();
 }
 
-// --- SETTINGS VIEW MANAGEMENT ---
+// --- SETTINGS VIEW ---
 
 function showSettingsView(viewId) {
     $('.lb-settings-view').hide();
     $(`#${viewId}`).show();
 }
-
-// --- SETTINGS LOGIC ---
 
 function saveButton(btnData) {
     const settings = getSettings();
@@ -383,7 +450,6 @@ function removeButton(index) {
 function openButtonEditor(index = null) {
     const settings = getSettings();
     editingIndex = index;
-    
     if (index !== null) {
         const btn = settings.buttons[index];
         $('#lb_new_label').val(btn.label);
@@ -404,8 +470,6 @@ function closeButtonEditor() {
     showSettingsView('lb-view-main-list');
 }
 
-// --- CHAIN EDITOR LOGIC ---
-
 function saveChain(chainName) {
     const settings = getSettings();
     if (!currentChainSteps || currentChainSteps.length === 0) {
@@ -416,7 +480,7 @@ function saveChain(chainName) {
     const newChain = { 
         name: chainName, 
         steps: [...currentChainSteps],
-        ephemeral: true // ALWAYS TRUE FOR CHAINS
+        ephemeral: true 
     };
 
     if (editingChainIndex !== null) {
@@ -443,7 +507,6 @@ function removeChain(index) {
 function openChainEditor(index = null) {
     const settings = getSettings();
     editingChainIndex = index;
-    
     if (index !== null) {
         const chain = settings.chains[index];
         $('#lb_chain_name').val(chain.name);
@@ -456,7 +519,6 @@ function openChainEditor(index = null) {
         $('#lb_chain_form_title').text("Create New Chain");
         $('#lb_save_chain_btn').text("Create Chain");
     }
-    
     renderChainPreview();
     showSettingsView('lb-view-editor-chain');
 }
@@ -546,7 +608,7 @@ function buildFloatingPanel() {
                 </div>
 
                 <div class="lb-footer-row">
-                    <label class="lb-checkbox-container" style="flex:1;">
+                    <label id="lb-eph-wrapper" class="lb-checkbox-container" style="flex:1;">
                         <input id="lb-global-eph" type="checkbox" checked> <span style="margin-left:4px">Ephemeral</span>
                     </label>
                     <div style="flex:1; display:flex; gap:2px;">
@@ -569,12 +631,20 @@ function buildFloatingPanel() {
     $('#lb-flush-btn').on('click', flushInjections);
     $('#lb-swipe-btn').on('click', reapplyAndSwipe);
     
+    // TAB LOGIC
     $('.lb-tab').on('click', function() {
         $('.lb-tab').removeClass('active');
         $(this).addClass('active');
         const target = $(this).data('tab');
         $('.lb-view').removeClass('active');
         $(`#lb-view-${target}`).addClass('active');
+
+        // VISIBILITY LOGIC
+        if (target === 'chains') {
+            $('#lb-eph-wrapper').css('visibility', 'hidden');
+        } else {
+            $('#lb-eph-wrapper').css('visibility', 'visible');
+        }
     });
 
     try { $('#lb-injector-panel').draggable({ handle: ".lb-header", containment: "window" }); } catch(e) {}
@@ -613,9 +683,12 @@ function injectSettingsMenu() {
                     </div>
                     <div id="lb_settings_chains_list" class="lb-settings-list"></div>
 
-                    <div style="margin-top:20px; text-align:right;">
-                        <button id="lb_reset_btn" class="menu_button" style="background:#7a2e2e;">Reset Defaults</button>
+                    <div style="margin-top:20px; display:flex; gap:5px; justify-content:flex-end;">
+                        <button id="lb_export_btn" class="menu_button" title="Export Settings"><i class="fa-solid fa-file-export"></i> Export</button>
+                        <button id="lb_import_btn" class="menu_button" title="Import Settings"><i class="fa-solid fa-file-import"></i> Import</button>
+                        <button id="lb_reset_btn" class="menu_button" style="background:#7a2e2e;" title="Reset Defaults"><i class="fa-solid fa-rotate-left"></i> Reset</button>
                     </div>
+                    <input type="file" id="lb-import-file" accept=".json" style="display:none" />
                 </div>
 
                 <div id="lb-view-editor-button" class="lb-settings-view" style="display:none;">
@@ -702,6 +775,11 @@ function injectSettingsMenu() {
         }
     });
 
+    // IMPORT / EXPORT
+    $('#lb_export_btn').on('click', exportSettings);
+    $('#lb_import_btn').on('click', importSettingsTrigger);
+    $('#lb-import-file').on('change', handleImportFile);
+
     $('#lb_reset_btn').on('click', () => { if(confirm("Reset all?")) resetDefaults(); });
     $('#lb-force-open-btn').on('click', togglePanel);
     $('#lb-reset-pos-btn').on('click', () => { $('#lb-injector-panel').css({ top: '100px', left: '100px', display: 'flex' }); });
@@ -714,8 +792,13 @@ function refreshUI() {
     
     const panelList = $('#lb-buttons-list');
     panelList.empty();
+    
     buttons.forEach(btn => {
-        const actionBtn = $(`<button class="menu_button lb-action-btn" data-label="${btn.label}" title="${btn.content}">${btn.label}</button>`);
+        const actionBtn = $('<button class="menu_button lb-action-btn"></button>')
+            .text(btn.label)
+            .attr('title', btn.content)
+            .attr('data-label', btn.label); 
+            
         actionBtn.on('click', () => injectButton(btn));
         panelList.append(actionBtn);
     });
@@ -753,14 +836,12 @@ function refreshSettingsUI() {
     const buttons = settings.buttons || [];
     const chains = settings.chains || [];
 
-    // CHAIN STEPS DROPDOWN
     const sourceSelect = $('#lb_chain_source');
     sourceSelect.empty();
     buttons.forEach(btn => {
         sourceSelect.append(`<option value="${btn.label}">${btn.label}</option>`);
     });
 
-    // BUTTONS LIST
     const btnList = $('#lb_settings_buttons_list');
     btnList.empty();
     buttons.forEach((btn, index) => {
@@ -778,7 +859,6 @@ function refreshSettingsUI() {
         btnList.append(item);
     });
 
-    // CHAINS LIST
     const chainList = $('#lb_settings_chains_list');
     chainList.empty();
     chains.forEach((chain, index) => {
