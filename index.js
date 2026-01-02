@@ -33,9 +33,9 @@ const DEFAULT_BUTTONS = [
 ];
 
 const DEFAULT_CHAINS = [
-    { name: "Standard Combat", ephemeral: true, steps: ["Buff", "Taunt", "Slash", "Block", "Slash", "Loot"] },
-    { name: "Dungeon Crawl", ephemeral: true, steps: ["Stealth", "Scout", "Stealth", "Scout", "Loot"] },
-    { name: "Epic Boss", ephemeral: true, steps: ["Scout", "Buff", "Taunt", "Slash", "Block", "Dodge", "Fireball", "Heal", "Finisher", "Loot"] }
+    { name: "Standard Combat", steps: ["Buff", "Taunt", "Slash", "Block", "Slash", "Loot"] },
+    { name: "Dungeon Crawl", steps: ["Stealth", "Scout", "Stealth", "Scout", "Loot"] },
+    { name: "Epic Boss", steps: ["Scout", "Buff", "Taunt", "Slash", "Block", "Dodge", "Fireball", "Heal", "Finisher", "Loot"] }
 ];
 
 // --- COMMAND EXECUTION ---
@@ -68,11 +68,12 @@ async function injectButton(btnData, isAuto = false) {
     const depth = parseInt($('#lb-global-depth').val()) || 0;
     const role = $('#lb-global-role').val() || 'system';
     
-    let isEphemeral;
-    if (activeChain && typeof activeChain.ephemeral !== 'undefined') {
-        isEphemeral = activeChain.ephemeral;
-    } else {
-        isEphemeral = $('#lb-global-eph').is(':checked');
+    // --- FORCE EPHEMERAL FOR CHAINS ---
+    // If a chain is active, we force ephemeral. 
+    // Otherwise, we respect the user's checkbox setting for manual buttons.
+    let isEphemeral = $('#lb-global-eph').is(':checked');
+    if (activeChain) {
+        isEphemeral = true;
     }
 
     const id = String(btnData.label).replace(/[^a-zA-Z0-9]/g, '_');
@@ -112,10 +113,14 @@ async function flushInjections() {
         refreshUI(); 
     }
 
-    if (isEphemeralMode) {
+    // Always clear ephemeral if we are stopping a chain or if checkbox is checked
+    if (isEphemeralMode || activeChain === null) {
         await clearEphemeralOnly();
-        toastr.info("Flushed ephemeral.");
-    } else {
+        if(isEphemeralMode) toastr.info("Flushed ephemeral.");
+    } 
+    
+    // Only clear permanent if we are NOT in ephemeral mode and NO chain was running
+    if (!isEphemeralMode && !activeChain) {
         const settings = getSettings();
         const buttons = settings.buttons || [];
         for (const btn of buttons) {
@@ -201,7 +206,6 @@ function startChain(chainIndex) {
     activeChain = { 
         name: chain.name, 
         steps: [...chain.steps], 
-        ephemeral: chain.ephemeral !== false,
         originIndex: chainIndex, 
         index: 0 
     };
@@ -254,7 +258,10 @@ function adjustChainStep(delta) {
         const label = activeChain.steps[newIndex - 1];
         const settings = getSettings();
         const btnData = settings.buttons.find(b => b.label === label);
-        if(btnData) lastInjectedBtn = btnData;
+        if(btnData) {
+            injectButton(btnData, true);
+            lastInjectedBtn = btnData;
+        }
     }
 
     updateVisualState();
@@ -361,8 +368,8 @@ function saveButton(btnData) {
     }
     closeButtonEditor();
     saveSettingsDebounced();
-    refreshUI(); // Panel
-    refreshSettingsUI(); // Settings List
+    refreshUI();
+    refreshSettingsUI();
 }
 
 function removeButton(index) {
@@ -399,7 +406,7 @@ function closeButtonEditor() {
 
 // --- CHAIN EDITOR LOGIC ---
 
-function saveChain(chainName, isEphemeral) {
+function saveChain(chainName) {
     const settings = getSettings();
     if (!currentChainSteps || currentChainSteps.length === 0) {
         toastr.warning("Chain must have steps.");
@@ -409,7 +416,7 @@ function saveChain(chainName, isEphemeral) {
     const newChain = { 
         name: chainName, 
         steps: [...currentChainSteps],
-        ephemeral: isEphemeral
+        ephemeral: true // ALWAYS TRUE FOR CHAINS
     };
 
     if (editingChainIndex !== null) {
@@ -440,13 +447,11 @@ function openChainEditor(index = null) {
     if (index !== null) {
         const chain = settings.chains[index];
         $('#lb_chain_name').val(chain.name);
-        $('#lb_chain_ephemeral').prop('checked', chain.ephemeral !== false);
         currentChainSteps = [...chain.steps];
         $('#lb_chain_form_title').text("Edit Chain");
         $('#lb_save_chain_btn').text("Update Chain");
     } else {
         $('#lb_chain_name').val('');
-        $('#lb_chain_ephemeral').prop('checked', true);
         currentChainSteps = [];
         $('#lb_chain_form_title').text("Create New Chain");
         $('#lb_save_chain_btn').text("Create Chain");
@@ -603,7 +608,7 @@ function injectSettingsMenu() {
                     <div id="lb_settings_buttons_list" class="lb-settings-list" style="margin-bottom:20px;"></div>
 
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-                        <h4>Chains</h4>
+                        <h4>Chains (Always Ephemeral)</h4>
                         <button id="lb-create-chain-go" class="menu_button" style="width:auto; padding:2px 8px;"><i class="fa-solid fa-plus"></i> New Chain</button>
                     </div>
                     <div id="lb_settings_chains_list" class="lb-settings-list"></div>
@@ -637,11 +642,6 @@ function injectSettingsMenu() {
                         <div class="lb-form-row">
                             <label>Chain Name</label>
                             <input type="text" id="lb_chain_name" class="text_pole" placeholder="e.g. Dungeon Loop">
-                        </div>
-                        <div class="lb-form-row">
-                            <label class="lb-checkbox-container">
-                                <input id="lb-chain_ephemeral" type="checkbox" checked> <span style="margin-left:4px">Ephemeral Chain?</span>
-                            </label>
                         </div>
                         
                         <div class="lb-form-row flex-row">
@@ -695,9 +695,8 @@ function injectSettingsMenu() {
 
     $('#lb_save_chain_btn').on('click', () => {
         const name = $('#lb_chain_name').val().trim();
-        const isEph = $('#lb_chain_ephemeral').is(':checked');
         if (name && currentChainSteps.length > 0) {
-            saveChain(name, isEph);
+            saveChain(name);
         } else {
             toastr.warning("Name and at least 1 step required");
         }
