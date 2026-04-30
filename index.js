@@ -188,9 +188,6 @@ async function flushInjections() {
 async function reapplyAndSwipe() {
     isRetrying = true;
     
-    // Ensure suffix is present on retry
-    await updateGlobalSuffixInjection();
-    
     if (activeChain && activeChain.index > 0) {
         const currentStepLabel = activeChain.steps[activeChain.index - 1];
         const settings = getSettings();
@@ -211,6 +208,7 @@ async function reapplyAndSwipe() {
         await executeCommand('/delete 1');
         await new Promise(r => setTimeout(r, 200));
         await injectButton(lastInjectedBtn, true);
+        await updateGlobalSuffixInjection();
         await executeCommand('/trigger');
     } catch (e) {
         console.error(e);
@@ -1104,6 +1102,10 @@ jQuery(async () => {
     }
 
     if(eventSource) {
+        eventSource.on(event_types.GENERATION_AFTER_COMMANDS, () => {
+            updateGlobalSuffixInjection();
+        });
+
         eventSource.on(event_types.MESSAGE_RECEIVED, () => {
             activeEphs.clear();
             if (activeChain) {
