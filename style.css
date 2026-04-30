@@ -36,14 +36,43 @@
     display: grid; grid-template-columns: 1fr 1fr; gap: 5px; 
     overflow-y: auto; max-height: 45vh; padding-right: 2px; 
 }
+
+/* UPDATED BUTTON STYLE */
 .lb-action-btn { 
-    width: 100%; text-align: center; padding: 12px 5px; 
-    font-size: 0.95em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    width: 100%; 
+    min-height: 40px; 
+    display: flex; align-items: center; justify-content: center;
+    text-align: center; 
+    padding: 6px 4px;
+    /* Extra padding right for the pencil icon */
+    padding-right: 15px; 
+    font-size: 0.85em; 
+    line-height: 1.2;
+    white-space: normal; 
+    word-wrap: break-word; 
     background-color: rgba(0, 0, 0, 0.6) !important;
     border: 1px solid var(--smart-border);
     transition: all 0.2s;
+    position: relative; /* Needed for pencil positioning */
 }
 .lb-action-btn:hover { background-color: var(--smart-accent) !important; color: #fff; }
+
+/* NEW QUICK EDIT ICON */
+.lb-quick-edit-icon {
+    position: absolute;
+    bottom: 2px;
+    right: 4px;
+    font-size: 0.75em;
+    opacity: 0.4;
+    cursor: pointer;
+    z-index: 10;
+    color: var(--smart-text-color);
+}
+.lb-quick-edit-icon:hover {
+    opacity: 1;
+    color: var(--smart-accent);
+    transform: scale(1.1);
+}
 
 .lb-active-eph {
     border: 2px solid #00ff00 !important;
@@ -65,6 +94,7 @@
     background-color: rgba(0, 80, 0, 0.7) !important; 
     border: 1px solid var(--smart-border);
     transition: all 0.2s;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .lb-chain-btn:hover { background-color: rgba(0, 120, 0, 0.9) !important; }
 
@@ -130,6 +160,17 @@
 .lb-settings-item { display: flex; align-items: center; padding: 8px; border-bottom: 1px solid var(--smart-border); gap: 5px; font-size: 0.9em; transition: 0.2s; }
 .lb-settings-item:last-child { border-bottom: none; }
 .lb-settings-item:hover { background-color: var(--smart-hover); }
+
+/* DRAG HANDLE STYLE */
+.lb-drag-handle {
+    cursor: grab;
+    opacity: 0.5;
+    margin-right: 10px;
+    font-size: 1.1em;
+    padding: 2px 5px;
+}
+.lb-drag-handle:hover { opacity: 1; color: var(--smart-accent); }
+.lb-drag-handle:active { cursor: grabbing; }
 
 .lb-tools { display: flex; gap: 8px; margin-left: auto; }
 .lb-delete-btn { cursor: pointer; color: #ff4444; padding: 5px; }

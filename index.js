@@ -60,10 +60,37 @@ async function executeCommand(command) {
     }
 }
 
-// --- INJECTION LOGIC ---
+// --- GLOBAL SUFFIX LOGIC (FIX FOR ISSUE 2) ---
+
+async function updateGlobalSuffixInjection() {
+    const globalSuffix = $('#lb-global-suffix').val() || '';
+    const suffixId = "lb_global_suffix";
+    const role = $('#lb-global-role').val() || 'system';
+    
+    // Check if ephemeral mode is on globally (or force it if active chain)
+    let isEphemeral = $('#lb-global-eph').is(':checked');
+    if (activeChain) isEphemeral = true;
+
+    if (globalSuffix.trim().length > 0) {
+        // Always inject at depth 0 as requested
+        const safeSuffix = globalSuffix.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+        const command = `/inject id="${suffixId}" ephemeral="${isEphemeral}" depth=0 role="${role}" position="chat" "${safeSuffix}"`;
+        await executeCommand(command);
+        console.log(`[${extensionName}] Global suffix updated (Depth 0).`);
+    } else {
+        // If empty, remove the injection
+        await executeCommand(`/inject id="${suffixId}" ""`);
+        console.log(`[${extensionName}] Global suffix cleared.`);
+    }
+}
+
+// --- BUTTON INJECTION LOGIC (FIX FOR ISSUE 1) ---
 
 async function injectButton(btnData, isAuto = false) {
     if (!btnData || !btnData.label) return;
+
+    // 1. First, ensure the global suffix is up to date (in case user just typed and clicked button immediately)
+    await updateGlobalSuffixInjection();
 
     const id = String(btnData.label).replace(/[^a-zA-Z0-9]/g, '_');
 
@@ -79,6 +106,7 @@ async function injectButton(btnData, isAuto = false) {
 
     lastInjectedBtn = btnData; 
 
+    // 2. Get Depth from the UI Input (for the button only)
     const depth = parseInt($('#lb-global-depth').val()) || 0;
     const role = $('#lb-global-role').val() || 'system';
     
@@ -90,6 +118,7 @@ async function injectButton(btnData, isAuto = false) {
         isEphemeral = $('#lb-global-eph').is(':checked');
     }
 
+    // 3. Inject the Button Content (at the chosen depth)
     let rawContent = String(btnData.content || `[${btnData.label}]`);
     const safeContent = rawContent.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
     
@@ -108,7 +137,6 @@ async function injectButton(btnData, isAuto = false) {
         activeEphs.delete(id);
         
         // --- SAFETY RESET ---
-        // If user manually applied a permanent injection, auto-reset the UI checkbox back to Ephemeral
         if (!activeChain) {
             $('#lb-global-eph').prop('checked', true);
         }
@@ -146,6 +174,10 @@ async function flushInjections() {
                 await executeCommand(`/inject id="${id}" ""`);
             }
         }
+        
+        // Clear the global suffix explicit injection if explicitly flushing permanent
+        await executeCommand(`/inject id="lb_global_suffix" ""`);
+        
         activePerms.clear();
         toastr.info("Cleared permanent.");
     }
@@ -155,6 +187,9 @@ async function flushInjections() {
 
 async function reapplyAndSwipe() {
     isRetrying = true;
+    
+    // Ensure suffix is present on retry
+    await updateGlobalSuffixInjection();
     
     if (activeChain && activeChain.index > 0) {
         const currentStepLabel = activeChain.steps[activeChain.index - 1];
@@ -320,19 +355,23 @@ function updateVisualState() {
     $('.lb-action-btn').each(function() {
         const btnLabel = $(this).attr('data-label');
         if (!btnLabel) return;
+        
         const id = String(btnLabel).replace(/[^a-zA-Z0-9]/g, '_');
         
+        // Find the inner text span so we don't kill the pencil icon
+        const textSpan = $(this).find('.lb-btn-text');
+
         $(this).removeClass('lb-active-eph lb-active-perm');
-        $(this).text(btnLabel); 
+        textSpan.text(btnLabel); 
 
         if (activeEphs.has(id)) {
             const depth = activeEphs.get(id);
             $(this).addClass('lb-active-eph');
-            $(this).text(`${btnLabel} [${depth}]`);
+            textSpan.text(`${btnLabel} [${depth}]`);
         } else if (activePerms.has(id)) {
             const depth = activePerms.get(id);
             $(this).addClass('lb-active-perm');
-            $(this).text(`${btnLabel} [${depth}]`);
+            textSpan.text(`${btnLabel} [${depth}]`);
         }
     });
 }
@@ -388,6 +427,72 @@ function togglePanel() {
     else panel.fadeIn(200).css('display', 'flex');
 }
 
+// --- PANEL QUICK EDIT LOGIC ---
+
+function openPanelEditor(index) {
+    const settings = getSettings();
+    const btn = settings.buttons[index];
+    if(!btn) return;
+
+    editingIndex = index;
+    
+    // Fill the inputs in the panel
+    $('#lb-panel-edit-label').val(btn.label);
+    $('#lb-panel-edit-content').val(btn.content || "");
+
+    // Switch view
+    $('.lb-view').removeClass('active');
+    $('#lb-view-editor').addClass('active');
+}
+
+function closePanelEditor() {
+    editingIndex = null;
+    // Return to buttons view
+    $('.lb-view').removeClass('active');
+    $('#lb-view-buttons').addClass('active');
+    
+    // Reset tabs
+    $('.lb-tab').removeClass('active');
+    $('.lb-tab[data-tab="buttons"]').addClass('active');
+}
+
+function savePanelEditor() {
+    if (editingIndex === null) return;
+    
+    const label = $('#lb-panel-edit-label').val().trim();
+    const content = $('#lb-panel-edit-content').val().trim();
+    
+    if(!label) {
+        toastr.warning("Label required");
+        return;
+    }
+
+    const settings = getSettings();
+    settings.buttons[editingIndex].label = label;
+    settings.buttons[editingIndex].content = content;
+    
+    saveSettingsDebounced();
+    refreshUI();
+    refreshSettingsUI(); // Update main settings too
+    toastr.success("Saved");
+    closePanelEditor();
+}
+
+// --- MAIN SETTINGS EDIT LOGIC ---
+
+function quickEditChain(index) {
+    if (!$('#lorebook-keys-settings-wrapper').is(':visible')) {
+        const toggle = $('#extensions_settings .inline-drawer-toggle');
+        if(toggle.length) toggle.click();
+    }
+    const wrapper = $('#lorebook-keys-settings-wrapper');
+    if (wrapper.length) {
+        wrapper.find('.inline-drawer-content').show();
+        wrapper[0].scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    openChainEditor(index);
+}
+
 // --- DATA ---
 
 function getSettings() {
@@ -420,8 +525,10 @@ function sanitizeSettings() {
 // --- SETTINGS VIEW ---
 
 function showSettingsView(viewId) {
+    // FORCE DISPLAY FLEX/BLOCK LOGIC
     $('.lb-settings-view').hide();
-    $(`#${viewId}`).show();
+    const target = $(`#${viewId}`);
+    if(target.length) target.show();
 }
 
 function saveButton(btnData) {
@@ -589,7 +696,28 @@ function buildFloatingPanel() {
                 <div class="lb-chain-list" id="lb-chains-list"></div>
             </div>
 
+            <!-- NEW EDITOR VIEW INSIDE PANEL -->
+            <div id="lb-view-editor" class="lb-view">
+                <div style="display:flex; flex-direction:column; gap:8px; height:100%;">
+                    <label style="font-size:0.8em; font-weight:bold;">Button Label</label>
+                    <input type="text" id="lb-panel-edit-label" class="lb-small-input" style="width:100%; box-sizing:border-box;">
+                    
+                    <label style="font-size:0.8em; font-weight:bold;">Injection Content</label>
+                    <textarea id="lb-panel-edit-content" class="lb-small-input" style="width:100%; height:120px; box-sizing:border-box; resize:none;"></textarea>
+                    
+                    <div style="display:flex; gap:5px; margin-top:auto;">
+                        <button id="lb-panel-save-btn" class="menu_button" style="flex:1; background:var(--smart-accent);">Save</button>
+                        <button id="lb-panel-cancel-btn" class="menu_button" style="flex:1;">Cancel</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="lb-separator"></div>
+
+            <!-- NEW GLOBAL SUFFIX FIELD -->
+            <div style="padding: 0 5px 5px 5px;">
+                <textarea id="lb-global-suffix" class="lb-small-input" style="width:100%; height:40px; resize:vertical;" placeholder="Global suffix (always depth 0)..."></textarea>
+            </div>
 
             <div class="lb-footer">
                 <div class="lb-footer-row" style="justify-content:space-between;">
@@ -631,6 +759,18 @@ function buildFloatingPanel() {
     $('#lb-flush-btn').on('click', flushInjections);
     $('#lb-swipe-btn').on('click', reapplyAndSwipe);
     
+    // ATTACH LISTENER TO GLOBAL SUFFIX FOR "ALWAYS ON" FUNCTIONALITY
+    $('#lb-global-suffix').on('blur', updateGlobalSuffixInjection);
+    $('#lb-global-suffix').on('keypress', function(e) {
+        if(e.which == 13 && !e.shiftKey) { // Enter (without shift) updates immediately
+            $(this).blur(); 
+        }
+    });
+
+    // EDITOR BUTTONS
+    $('#lb-panel-save-btn').on('click', savePanelEditor);
+    $('#lb-panel-cancel-btn').on('click', closePanelEditor);
+
     // TAB LOGIC
     $('.lb-tab').on('click', function() {
         $('.lb-tab').removeClass('active');
@@ -793,13 +933,38 @@ function refreshUI() {
     const panelList = $('#lb-buttons-list');
     panelList.empty();
     
-    buttons.forEach(btn => {
+    buttons.forEach((btn, index) => {
+        // Create button with specific span for text to avoid overwriting the icon later
         const actionBtn = $('<button class="menu_button lb-action-btn"></button>')
-            .text(btn.label)
             .attr('title', btn.content)
-            .attr('data-label', btn.label); 
-            
+            .attr('data-label', btn.label);
+        
+        // Text Container
+        const textSpan = $('<span class="lb-btn-text"></span>').text(btn.label);
+        actionBtn.append(textSpan);
+
+        // Edit Icon (Pencil)
+        const editIcon = $('<i class="fa-solid fa-pencil lb-quick-edit-icon" title="Edit"></i>');
+        
+        // Important: Stop propagation so we don't inject when clicking edit
+        editIcon.on('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            openPanelEditor(index); // <--- THIS NOW OPENS THE IN-PANEL EDITOR
+        });
+        
+        // Append Icon
+        actionBtn.append(editIcon);
+
+        // Main click action
         actionBtn.on('click', () => injectButton(btn));
+        
+        // Keep Context Menu just in case
+        actionBtn.on('contextmenu', (e) => {
+            e.preventDefault();
+            openPanelEditor(index);
+        });
+
         panelList.append(actionBtn);
     });
 
@@ -824,6 +989,13 @@ function refreshUI() {
         const row = $(`<div class="lb-chain-row"></div>`);
         const btn = $(`<button class="menu_button ${btnClass}" title="${chain.steps.join(' -> ')}"><span style="margin-right:10px;">${icon}</span>${chain.name}</button>`);
         btn.on('click', () => toggleChain(idx));
+        
+        // Context Menu
+        btn.on('contextmenu', (e) => {
+            e.preventDefault();
+            quickEditChain(idx);
+        });
+
         row.append(btn);
         chainList.append(row);
     });
@@ -844,9 +1016,28 @@ function refreshSettingsUI() {
 
     const btnList = $('#lb_settings_buttons_list');
     btnList.empty();
+    
+    // Sortable logic
+    btnList.sortable({
+        handle: '.lb-drag-handle',
+        update: function() {
+            const newOrder = [];
+            $(this).find('.lb-settings-item').each(function() {
+                const label = $(this).data('label');
+                const btn = settings.buttons.find(b => b.label === label);
+                if(btn) newOrder.push(btn);
+            });
+            settings.buttons = newOrder;
+            saveSettingsDebounced();
+            refreshSettingsUI(); 
+            refreshUI(); 
+        }
+    });
+
     buttons.forEach((btn, index) => {
         const item = $(`
-            <div class="lb-settings-item">
+            <div class="lb-settings-item" data-label="${btn.label}">
+                <div class="lb-drag-handle"><i class="fa-solid fa-grip-lines"></i></div>
                 <div style="flex:1; overflow:hidden; font-weight:bold;">${btn.label}</div>
                 <div class="lb-tools">
                     <div class="lb-edit-btn"><i class="fa-solid fa-pencil"></i></div>
@@ -861,9 +1052,27 @@ function refreshSettingsUI() {
 
     const chainList = $('#lb_settings_chains_list');
     chainList.empty();
+    
+    chainList.sortable({
+        handle: '.lb-drag-handle',
+        update: function() {
+            const newOrder = [];
+            $(this).find('.lb-settings-item').each(function() {
+                const name = $(this).data('name');
+                const chain = settings.chains.find(c => c.name === name);
+                if(chain) newOrder.push(chain);
+            });
+            settings.chains = newOrder;
+            saveSettingsDebounced();
+            refreshSettingsUI(); 
+            refreshUI();
+        }
+    });
+
     chains.forEach((chain, index) => {
         const item = $(`
-            <div class="lb-settings-item">
+            <div class="lb-settings-item" data-name="${chain.name}">
+                <div class="lb-drag-handle"><i class="fa-solid fa-grip-lines"></i></div>
                 <div style="flex:1; overflow:hidden;"><b>${chain.name}</b> <small>(${chain.steps.length} steps)</small></div>
                 <div class="lb-tools">
                     <div class="lb-edit-chain-btn" style="color:var(--smart-accent); cursor:pointer;"><i class="fa-solid fa-pencil"></i></div>
@@ -911,6 +1120,9 @@ jQuery(async () => {
             activePerms.clear();
             activeChain = null;
             pausedChainState = null;
+            
+            // Re-apply suffix logic if needed on chat change
+            updateGlobalSuffixInjection();
             updateVisualState();
         });
     }
@@ -921,5 +1133,11 @@ jQuery(async () => {
     setTimeout(() => {
         const panel = $('#lb-injector-panel');
         if (!panel.is(':visible')) panel.fadeIn(200).css('display', 'flex');
+        
+        // Ensure listener is attached if DOM took time
+        $('#lb-global-suffix').off('blur').on('blur', updateGlobalSuffixInjection);
+        $('#lb-global-suffix').off('keypress').on('keypress', function(e) {
+            if(e.which == 13 && !e.shiftKey) $(this).blur();
+        });
     }, 800);
 });
